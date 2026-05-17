@@ -134,3 +134,11 @@ C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\runtimes\win-arm64\native\e_sqlite3.dll
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\runtimes\win-x64\native\e_sqlite3.dll
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\runtimes\win-x86\native\e_sqlite3.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\appsettings.Development.json
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\appsettings.example.json
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\appsettings.json
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.exe
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.deps.json
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.runtimeconfig.json
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.pdb

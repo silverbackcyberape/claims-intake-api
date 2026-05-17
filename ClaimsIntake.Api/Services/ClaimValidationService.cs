@@ -24,8 +24,9 @@ public sealed class ClaimValidationService : IClaimValidationService
             }
 
             RequireString(root, "claimReference", errors);
-            RequireObject(root, "claimant", errors);
-            RequireObject(root, "incident", errors);
+            RequireObject(root, "fields", errors);
+            RequireArray(root, "missingRequiredFields", errors);
+            RequireBoolean(root, "requiresReview", errors);
         }
         catch (JsonException ex)
         {
@@ -50,6 +51,23 @@ public sealed class ClaimValidationService : IClaimValidationService
         if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Object)
         {
             errors.Add($"{propertyName} object is required.");
+        }
+    }
+
+    private static void RequireArray(JsonElement root, string propertyName, List<string> errors)
+    {
+        if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            errors.Add($"{propertyName} array is required.");
+        }
+    }
+
+    private static void RequireBoolean(JsonElement root, string propertyName, List<string> errors)
+    {
+        if (!root.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            errors.Add($"{propertyName} boolean is required.");
         }
     }
 }

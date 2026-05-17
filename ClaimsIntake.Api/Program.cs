@@ -8,6 +8,7 @@ using ClaimsIntake.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,7 +25,33 @@ builder.Services.AddScoped<IClaimExtractionService, OpenAiClaimExtractionService
 builder.Services.AddScoped<IClaimValidationService, ClaimValidationService>();
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
+    {
+        Description = "API key required in the X-API-Key header.",
+        Name = "X-API-Key",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "ApiKeyScheme"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "ApiKey"
+                },
+                In = ParameterLocation.Header
+            },
+            []
+        }
+    });
+});
 
 var app = builder.Build();
 
@@ -38,6 +65,22 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    app.MapPost("/api/dev/client-claims", (
+            JsonElement claimJson,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("ClaimsIntake.DevClient");
+            logger.LogInformation("Development client API received extracted claim JSON: {ClaimJson}", claimJson);
+
+            return Results.Accepted(value: new
+            {
+                status = "received",
+                receivedAt = DateTimeOffset.UtcNow
+            });
+        })
+        .WithName("DevelopmentClientClaimsApi")
+        .WithOpenApi();
 }
 
 app.UseHttpsRedirection();
@@ -48,6 +91,7 @@ claims.MapPost("/documents", async (
         HttpRequest httpRequest,
         [FromForm] ClaimDocumentUploadRequest request,
         ClaimsIntakeDbContext dbContext,
+        IWebHostEnvironment environment,
         IFileStorageService fileStorageService,
         IClaimExtractionService extractionService,
         IClaimValidationService validationService,
@@ -73,7 +117,14 @@ claims.MapPost("/documents", async (
             return Results.BadRequest(new { error = "claimReference is required." });
         }
 
-        if (!IsValidJsonOrEmpty(request.MetadataJson))
+        var metadataJson = NormalizeOptionalFormValue(
+            request.MetadataJson,
+            treatSwaggerPlaceholderAsEmpty: environment.IsDevelopment());
+        var callbackUrl = NormalizeOptionalFormValue(
+            request.CallbackUrl,
+            treatSwaggerPlaceholderAsEmpty: environment.IsDevelopment());
+
+        if (!IsValidJsonOrEmpty(metadataJson))
         {
             return Results.BadRequest(new { error = "metadataJson must be valid JSON when supplied." });
         }
@@ -99,7 +150,7 @@ claims.MapPost("/documents", async (
             job.ExtractedJson = await extractionService.ExtractAsync(
                 job.StoredFilePath,
                 job.ClaimReference,
-                request.MetadataJson,
+                metadataJson,
                 cancellationToken);
 
             var validationResult = validationService.Validate(job.ExtractedJson);
@@ -115,7 +166,7 @@ claims.MapPost("/documents", async (
 
             var clientApiResult = await clientClaimsApiService.PostClaimAsync(
                 job.ExtractedJson,
-                request.CallbackUrl,
+                callbackUrl,
                 cancellationToken);
 
             job.ClientApiStatusCode = clientApiResult.StatusCode;
@@ -232,6 +283,21 @@ static bool IsValidJsonOrEmpty(string? json)
     {
         return false;
     }
+}
+
+static string? NormalizeOptionalFormValue(string? value, bool treatSwaggerPlaceholderAsEmpty)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var trimmed = value.Trim();
+
+    return treatSwaggerPlaceholderAsEmpty &&
+           string.Equals(trimmed, "string", StringComparison.OrdinalIgnoreCase)
+        ? null
+        : trimmed;
 }
 
 static object ToJobResponse(ClaimProcessingJob job) => new

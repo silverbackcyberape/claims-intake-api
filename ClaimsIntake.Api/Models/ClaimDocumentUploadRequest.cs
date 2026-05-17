@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace ClaimsIntake.Api.Models;
 
 public sealed class ClaimDocumentUploadRequest
@@ -6,7 +8,9 @@ public sealed class ClaimDocumentUploadRequest
 
     public string ClaimReference { get; set; } = string.Empty;
 
+    [DefaultValue("{}")]
     public string? MetadataJson { get; set; }
 
+    [DefaultValue("")]
     public string? CallbackUrl { get; set; }
 }
