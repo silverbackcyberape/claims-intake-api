@@ -32,7 +32,7 @@ public sealed class OpenAiClaimExtractionService(
         }
 
         var model = string.IsNullOrWhiteSpace(openAiOptions.OpenAiModel)
-            ? "gpt-4.1-mini"
+            ? "gpt-4o-mini"
             : openAiOptions.OpenAiModel;
 
         logger.LogInformation(
@@ -40,41 +40,99 @@ public sealed class OpenAiClaimExtractionService(
             storedFilePath,
             model);
 
-        try
-        {
-            var responsesClient = new ResponsesClient(openAiOptions.OpenAiApiKey);
-            var inputParts = await BuildInputPartsAsync(
-                openAiOptions.OpenAiApiKey,
-                storedFilePath,
-                claimReference,
-                metadataJson,
-                cancellationToken);
+        return await ExecuteWithRetryAsync(
+            async attemptCancellationToken =>
+            {
+                var responsesClient = new ResponsesClient(openAiOptions.OpenAiApiKey);
+                var inputParts = await BuildInputPartsAsync(
+                    openAiOptions.OpenAiApiKey,
+                    storedFilePath,
+                    claimReference,
+                    metadataJson,
+                    attemptCancellationToken);
 
-            var response = await responsesClient.CreateResponseAsync(
-                model,
-                [ResponseItem.CreateUserMessageItem(inputParts)],
-                cancellationToken: cancellationToken);
+                var response = await responsesClient.CreateResponseAsync(
+                    model,
+                    [ResponseItem.CreateUserMessageItem(inputParts)],
+                    cancellationToken: attemptCancellationToken);
 
-            var outputText = response.Value.GetOutputText();
-            var extractedJson = NormalizeStrictJson(outputText);
+                var outputText = response.Value.GetOutputText();
+                var extractedJson = NormalizeStrictJson(outputText);
 
-            logger.LogInformation("OpenAI extraction completed for claim {ClaimReference}.", claimReference);
-            return extractedJson;
-        }
-        catch (ClientResultException ex)
+                logger.LogInformation("OpenAI extraction completed for claim {ClaimReference}.", claimReference);
+                return extractedJson;
+            },
+            claimReference,
+            openAiOptions.OpenAiTimeoutSeconds,
+            openAiOptions.OpenAiMaxRetries,
+            cancellationToken);
+    }
+
+    private async Task<string> ExecuteWithRetryAsync(
+        Func<CancellationToken, Task<string>> operation,
+        string claimReference,
+        int timeoutSeconds,
+        int maxRetries,
+        CancellationToken cancellationToken)
+    {
+        var attempts = Math.Max(1, maxRetries + 1);
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 10, 300));
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            logger.LogError(
-                ex,
-                "OpenAI API request failed while extracting claim {ClaimReference}. Status: {Status}",
-                claimReference,
-                ex.Status);
-            throw new InvalidOperationException("OpenAI extraction failed. See logs for details.", ex);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+
+            try
+            {
+                return await operation(timeoutCts.Token);
+            }
+            catch (ClientResultException ex) when (ShouldRetryOpenAi(ex.Status) && attempt < attempts)
+            {
+                logger.LogWarning(
+                    ex,
+                    "OpenAI extraction attempt {Attempt}/{Attempts} failed for claim {ClaimReference}. Status: {Status}. Retrying.",
+                    attempt,
+                    attempts,
+                    claimReference,
+                    ex.Status);
+
+                await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+            }
+            catch (ClientResultException ex)
+            {
+                var message = $"OpenAI extraction failed. Status: {ex.Status}. {SanitizeOpenAiErrorMessage(ex.Message)}";
+                logger.LogError(
+                    ex,
+                    "OpenAI API request failed while extracting claim {ClaimReference}. Status: {Status}.",
+                    claimReference,
+                    ex.Status);
+                throw new InvalidOperationException(message, ex);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested && attempt < attempts)
+            {
+                logger.LogWarning(
+                    ex,
+                    "OpenAI extraction attempt {Attempt}/{Attempts} timed out for claim {ClaimReference}. Retrying.",
+                    attempt,
+                    attempts,
+                    claimReference);
+
+                await Task.Delay(GetRetryDelay(attempt), cancellationToken);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+            {
+                logger.LogError(ex, "OpenAI extraction timed out for claim {ClaimReference}.", claimReference);
+                throw new TimeoutException($"OpenAI extraction timed out after {timeout.TotalSeconds:N0} seconds.", ex);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogError(ex, "OpenAI returned non-JSON output for claim {ClaimReference}.", claimReference);
+                throw new InvalidOperationException("OpenAI extraction did not return valid JSON.", ex);
+            }
         }
-        catch (JsonException ex)
-        {
-            logger.LogError(ex, "OpenAI returned non-JSON output for claim {ClaimReference}.", claimReference);
-            throw new InvalidOperationException("OpenAI extraction did not return valid JSON.", ex);
-        }
+
+        throw new InvalidOperationException("OpenAI extraction failed after retry attempts.");
     }
 
     private static async Task<IList<ResponseContentPart>> BuildInputPartsAsync(
@@ -89,11 +147,18 @@ public sealed class OpenAiClaimExtractionService(
 
         if (IsSupportedImageContentType(contentType))
         {
-            var fileBytes = await File.ReadAllBytesAsync(storedFilePath, cancellationToken);
+            var fileClient = new OpenAIFileClient(apiKey);
+            await using var stream = File.OpenRead(storedFilePath);
+            var file = await fileClient.UploadFileAsync(
+                stream,
+                Path.GetFileName(storedFilePath),
+                FileUploadPurpose.Vision,
+                cancellationToken);
+
             return
             [
                 ResponseContentPart.CreateInputTextPart(prompt),
-                ResponseContentPart.CreateInputImagePart(BinaryData.FromBytes(fileBytes), contentType)
+                ResponseContentPart.CreateInputImagePart(file.Value.Id)
             ];
         }
 
@@ -203,5 +268,22 @@ public sealed class OpenAiClaimExtractionService(
     private static bool IsSupportedImageContentType(string contentType)
     {
         return contentType is "image/jpeg" or "image/png" or "image/webp" or "image/gif";
+    }
+
+    private static bool ShouldRetryOpenAi(int status)
+    {
+        return status is 408 or 429 or >= 500;
+    }
+
+    private static TimeSpan GetRetryDelay(int attempt)
+    {
+        return TimeSpan.FromSeconds(Math.Min(8, Math.Pow(2, attempt)));
+    }
+
+    private static string SanitizeOpenAiErrorMessage(string message)
+    {
+        return message
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
     }
 }

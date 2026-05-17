@@ -14,5 +14,13 @@ public sealed class ClaimsIntakeOptions
 
     public string OpenAiApiKey { get; set; } = string.Empty;
 
-    public string OpenAiModel { get; set; } = "gpt-4.1-mini";
+    public string OpenAiModel { get; set; } = "gpt-4o-mini";
+
+    public long MaxUploadBytes { get; set; } = 10 * 1024 * 1024;
+
+    public int OpenAiTimeoutSeconds { get; set; } = 90;
+
+    public int OpenAiMaxRetries { get; set; } = 2;
+
+    public int ClientApiTimeoutSeconds { get; set; } = 30;
 }

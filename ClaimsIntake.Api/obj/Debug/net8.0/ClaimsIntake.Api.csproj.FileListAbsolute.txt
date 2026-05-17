@@ -142,3 +142,17 @@ C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.runtimeconfig.json
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.dll
 C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\verify-build\ClaimsIntake.Api.pdb
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\Microsoft.Extensions.Configuration.Abstractions.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\Microsoft.Extensions.Diagnostics.Abstractions.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\Microsoft.Extensions.Hosting.Abstractions.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\Microsoft.Extensions.Primitives.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\OpenAI.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.ClientModel.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.Diagnostics.DiagnosticSource.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.IO.Pipelines.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.Memory.Data.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.Net.ServerSentEvents.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.Text.Encodings.Web.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\System.Text.Json.dll
+C:\Users\BC_Admin\Desktop\Denis\claims-intake-api\claims-intake-api\ClaimsIntake.Api\bin\Debug\net8.0\runtimes\browser\lib\net8.0\System.Text.Encodings.Web.dll

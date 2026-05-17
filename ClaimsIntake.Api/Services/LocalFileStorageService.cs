@@ -10,14 +10,10 @@ public sealed class LocalFileStorageService(
 {
     public async Task<string> SaveAsync(IFormFile file, CancellationToken cancellationToken)
     {
-        var storagePath = options.Value.UploadStoragePath;
-        var uploadRoot = Path.IsPathRooted(storagePath)
-            ? storagePath
-            : Path.Combine(environment.ContentRootPath, storagePath);
-
+        var uploadRoot = GetUploadRoot(options.Value.UploadStoragePath, environment.ContentRootPath);
         Directory.CreateDirectory(uploadRoot);
 
-        var extension = Path.GetExtension(file.FileName);
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
         var storedFileName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}{extension}";
         var storedFilePath = Path.Combine(uploadRoot, storedFileName);
 
@@ -26,5 +22,15 @@ public sealed class LocalFileStorageService(
 
         logger.LogInformation("Stored uploaded claim document at {StoredFilePath}", storedFilePath);
         return storedFilePath;
+    }
+
+    public static string GetUploadRoot(string storagePath, string contentRootPath)
+    {
+        var path = string.IsNullOrWhiteSpace(storagePath) ? "uploads" : storagePath;
+        var uploadRoot = Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(contentRootPath, path);
+
+        return Path.GetFullPath(uploadRoot);
     }
 }

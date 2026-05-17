@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,20 +7,37 @@ using ClaimsIntake.Api.Data;
 using ClaimsIntake.Api.Models;
 using ClaimsIntake.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+var startupOptions = builder.Configuration
+    .GetSection(ClaimsIntakeOptions.SectionName)
+    .Get<ClaimsIntakeOptions>() ?? new ClaimsIntakeOptions();
 
 builder.Services.Configure<ClaimsIntakeOptions>(
     builder.Configuration.GetSection(ClaimsIntakeOptions.SectionName));
+
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = startupOptions.MaxUploadBytes;
+});
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = startupOptions.MaxUploadBytes;
+});
 
 builder.Services.AddDbContext<ClaimsIntakeDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("ClaimsIntake")
         ?? "Data Source=claims-intake.db"));
 
-builder.Services.AddHttpClient<IClientClaimsApiService, ClientClaimsApiService>();
+builder.Services.AddHttpClient<IClientClaimsApiService, ClientClaimsApiService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(startupOptions.ClientApiTimeoutSeconds, 5, 120));
+});
 builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
 builder.Services.AddScoped<IClaimExtractionService, OpenAiClaimExtractionService>();
 builder.Services.AddScoped<IClaimValidationService, ClaimValidationService>();
@@ -57,8 +75,30 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var startupLogger = scope.ServiceProvider
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("ClaimsIntake.Startup");
     var dbContext = scope.ServiceProvider.GetRequiredService<ClaimsIntakeDbContext>();
-    dbContext.Database.EnsureCreated();
+    var configuredOptions = scope.ServiceProvider.GetRequiredService<IOptions<ClaimsIntakeOptions>>().Value;
+
+    try
+    {
+        dbContext.Database.EnsureCreated();
+
+        var uploadRoot = LocalFileStorageService.GetUploadRoot(
+            configuredOptions.UploadStoragePath,
+            app.Environment.ContentRootPath);
+        Directory.CreateDirectory(uploadRoot);
+
+        startupLogger.LogInformation(
+            "ClaimsIntake startup checks completed. UploadRoot: {UploadRoot}",
+            uploadRoot);
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogCritical(ex, "ClaimsIntake startup checks failed.");
+        throw;
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -83,7 +123,63 @@ if (app.Environment.IsDevelopment())
         .WithOpenApi();
 }
 
+app.Use(async (context, next) =>
+{
+    const string correlationHeaderName = "X-Correlation-ID";
+    var correlationId = context.Request.Headers.TryGetValue(correlationHeaderName, out var incomingCorrelationId) &&
+                        !string.IsNullOrWhiteSpace(incomingCorrelationId)
+        ? incomingCorrelationId.ToString()
+        : Guid.NewGuid().ToString("N");
+
+    context.TraceIdentifier = correlationId;
+    context.Response.Headers[correlationHeaderName] = correlationId;
+
+    var logger = context.RequestServices
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("ClaimsIntake.Requests");
+    var stopwatch = Stopwatch.StartNew();
+
+    using (logger.BeginScope(new Dictionary<string, object>
+           {
+               ["CorrelationId"] = correlationId
+           }))
+    {
+        try
+        {
+            await next();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Unhandled exception for {Method} {Path}.",
+                context.Request.Method,
+                context.Request.Path.Value);
+            throw;
+        }
+        finally
+        {
+            stopwatch.Stop();
+            logger.LogInformation(
+                "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMilliseconds} ms.",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Response.StatusCode,
+                stopwatch.ElapsedMilliseconds);
+        }
+    }
+});
+
 app.UseHttpsRedirection();
+
+app.MapGet("/health", () => Results.Ok(new
+    {
+        status = "Healthy",
+        checkedAt = DateTimeOffset.UtcNow
+    }))
+    .AllowAnonymous()
+    .WithName("Health")
+    .WithOpenApi();
 
 var claims = app.MapGroup("/api/claims");
 
@@ -101,8 +197,9 @@ claims.MapPost("/documents", async (
         CancellationToken cancellationToken) =>
     {
         var logger = loggerFactory.CreateLogger("ClaimsIntake.Documents");
+        var configuredOptions = options.Value;
 
-        if (!IsAuthorized(httpRequest, options.Value.InboundApiKey))
+        if (!IsAuthorized(httpRequest, configuredOptions.InboundApiKey))
         {
             return Results.Unauthorized();
         }
@@ -110,6 +207,22 @@ claims.MapPost("/documents", async (
         if (request.File is null || request.File.Length == 0)
         {
             return Results.BadRequest(new { error = "A non-empty file is required." });
+        }
+
+        if (request.File.Length > configuredOptions.MaxUploadBytes)
+        {
+            return Results.Problem(
+                title: "Uploaded file is too large.",
+                detail: $"Maximum upload size is {configuredOptions.MaxUploadBytes} bytes.",
+                statusCode: StatusCodes.Status413PayloadTooLarge);
+        }
+
+        if (!IsAllowedUploadExtension(request.File.FileName))
+        {
+            return Results.BadRequest(new
+            {
+                error = "Unsupported file type. Upload a .jpg, .jpeg, .png, .webp, .gif, or .pdf file."
+            });
         }
 
         if (string.IsNullOrWhiteSpace(request.ClaimReference))
@@ -143,6 +256,7 @@ claims.MapPost("/documents", async (
 
         try
         {
+            // TODO: Move processing to a durable background queue when uploads need async client acknowledgement.
             job.Status = ClaimProcessingJobStatus.Processing;
             job.StoredFilePath = await fileStorageService.SaveAsync(request.File, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -191,10 +305,14 @@ claims.MapPost("/documents", async (
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to process claim document for {ClaimReference}.", job.ClaimReference);
+            logger.LogError(
+                ex,
+                "Failed to process claim document for {ClaimReference}. JobId: {JobId}.",
+                job.ClaimReference,
+                job.Id);
 
             job.Status = ClaimProcessingJobStatus.Failed;
-            job.ErrorMessage = ex.Message;
+            job.ErrorMessage = GetSafeErrorMessage(ex);
             job.ProcessedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(CancellationToken.None);
 
@@ -220,10 +338,11 @@ claims.MapGet("/jobs", async (
         }
 
         var jobs = await dbContext.ClaimProcessingJobs
-            .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return Results.Ok(jobs.Select(ToJobResponse));
+        return Results.Ok(jobs
+            .OrderByDescending(job => job.CreatedAt)
+            .Select(ToJobResponse));
     })
     .WithName("GetClaimProcessingJobs")
     .WithOpenApi();
@@ -298,6 +417,19 @@ static string? NormalizeOptionalFormValue(string? value, bool treatSwaggerPlaceh
            string.Equals(trimmed, "string", StringComparison.OrdinalIgnoreCase)
         ? null
         : trimmed;
+}
+
+static bool IsAllowedUploadExtension(string fileName)
+{
+    return Path.GetExtension(fileName).ToLowerInvariant() is
+        ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".pdf";
+}
+
+static string GetSafeErrorMessage(Exception exception)
+{
+    return exception.Message
+        .Replace("\r", " ", StringComparison.Ordinal)
+        .Replace("\n", " ", StringComparison.Ordinal);
 }
 
 static object ToJobResponse(ClaimProcessingJob job) => new
