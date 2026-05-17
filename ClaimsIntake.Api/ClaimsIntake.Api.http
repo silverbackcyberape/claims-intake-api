@@ -1,6 +1,34 @@
 @ClaimsIntake.Api_HostAddress = http://localhost:5041
+@ApiKey = replace-with-a-strong-inbound-api-key
+@JobId = replace-with-job-id
 
-GET {{ClaimsIntake.Api_HostAddress}}/weatherforecast/
+POST {{ClaimsIntake.Api_HostAddress}}/api/claims/documents
+X-API-Key: {{ApiKey}}
+Content-Type: multipart/form-data; boundary=claim-boundary
+
+--claim-boundary
+Content-Disposition: form-data; name="claimReference"
+
+CLM-10001
+--claim-boundary
+Content-Disposition: form-data; name="metadataJson"
+
+{"source":"http-file"}
+--claim-boundary
+Content-Disposition: form-data; name="file"; filename="sample-claim.txt"
+Content-Type: text/plain
+
+Sample claim document content.
+--claim-boundary--
+
+###
+
+GET {{ClaimsIntake.Api_HostAddress}}/api/claims/jobs
+X-API-Key: {{ApiKey}}
 Accept: application/json
 
 ###
+
+GET {{ClaimsIntake.Api_HostAddress}}/api/claims/jobs/{{JobId}}
+X-API-Key: {{ApiKey}}
+Accept: application/json
